@@ -256,3 +256,40 @@ app.listen(PORT,()=>{
   console.log(`ARKA Quant Relay v2.0 en puerto ${PORT}`);
   console.log(`API Key: ${process.env.ARKA_API_KEY?'ENABLED':'DISABLED (dev mode)'}`);
 });
+
+// ─── /api/chat ────────────────────────────────────────────────────────────────
+// Proxies chat messages to Anthropic Claude (avoids CORS from browser)
+// Body: { system: string, messages: [{role, content}] }
+app.post('/api/chat', requireAuth, async (req, res) => {
+  const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
+  if (!ANTHROPIC_KEY) return res.status(500).json({ error: 'ANTHROPIC_API_KEY not configured in relay' });
+
+  const { system, messages } = req.body;
+  if (!messages?.length) return res.status(400).json({ error: 'messages required' });
+
+  try {
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': ANTHROPIC_KEY,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1024,
+        system: system || 'Eres el asistente de trading de ARKA.',
+        messages
+      })
+    });
+
+    if (!r.ok) {
+      const err = await r.json();
+      return res.status(r.status).json({ error: err.error?.message || `Anthropic HTTP ${r.status}` });
+    }
+
+    const data = await r.json();
+    res.json({ content: data.content?.[0]?.text || '' });
+
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
